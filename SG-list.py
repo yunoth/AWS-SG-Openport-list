@@ -10,53 +10,58 @@ import smtplib
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-#define the connection
-ec2 = boto3.client('ec2')
-
-def listsg(event, context):
+def listsg(event,context):
     filters = [
         {
             'Name': 'vpc-id', 
-            'Values': ['<VPCID>','<VPCID>']
+            'Values': ['VPCID']
         }
     ]
-    #List Security group list
-    instances = ec2.describe_security_groups(Filters=filters)
-    sglist = instances['SecurityGroups']
     sg = []
     sg_out = []
-    for i in sglist:
-        report = []
-        report_out = []
-        print(i['IpPermissions'],i['GroupName'],i['GroupId'])
-        print("calling parse function")
-        report = parse(i['IpPermissions'],i['GroupName'],i['GroupId'],'inbound')
-        report_out = parse(i['IpPermissionsEgress'],i['GroupName'],i['GroupId'],'outbound')
-        if not report:
-            continue
-        for i in report:
-            sg.append(i)
-        for i in report_out:
-            sg_out.append(i)
-    html = table_formation(['Name','ID','Port','Description','Type'],sg)
-    html_out = table_formation(['Name','ID','Port','Description','Type'],sg_out)
-    mailer(html+"<br />"+html_out)
-    print "Mail sent"
+    regions = { 'us-east-1':'N.Virginia','us-west-2':'Oregon','ap-southeast-1':'Singapore'}
+    for region in regions.keys():
+        ec2 = boto3.client('ec2',region_name=region)
+        #List Security group list
+        instances = ec2.describe_security_groups(Filters=filters)
+        sglist = instances['SecurityGroups']
+        for i in sglist:
+            report = []
+            report_out = []
+            report = parse(i['IpPermissions'],i['GroupName'],i['GroupId'],'inbound',regions[region])
+            report_out = parse(i['IpPermissionsEgress'],i['GroupName'],i['GroupId'],'outbound',regions[region])
+            if not report:
+                continue
+            for i in report:
+                sg.append(i)
+            for i in report_out:
+                sg_out.append(i)
+    html = table_formation(['Name','ID','Port','Description','Type','Region'],sg)
+    html_out = table_formation(['Name','ID','Port','Description','Type','Region'],sg_out)
+    mailer(html+"<br />"+html_out)   
+
     
-def parse(rules,name,sgid,type_):
+def parse(rules,name,sgid,type_,region):
     colomn = list()
-    print rules
     for i in rules:
-      if i.has_key('ToPort'):
-          port = i['ToPort']
+      if i['IpRanges'] == []:
+          for rule in i['UserIdGroupPairs']:
+                port = rule['GroupId']
+                col = (name,sgid,port,rule.get('Description','NA'),type_,region)
+                colomn.append(col)
       else:
-          continue
+          if i['IpProtocol'] == '-1':
+                port = 'All traffic'
+          else:
+                if i.has_key('ToPort'):
+                        port = i['ToPort']
+                else:
+                    continue
       for rule in i['IpRanges']:
           if rule['CidrIp'] == '0.0.0.0/0':
-            col = (name,sgid,port,rule.get('Description','NA'),type_)
+            col = (name,sgid,port,rule.get('Description','NA'),type_,region)
             colomn.append(col)
     return colomn
-
     
 def table_formation(header,data,opt="center"):
         html_str=''
@@ -85,15 +90,15 @@ def table_formation(header,data,opt="center"):
 def mailer(html):
         today = datetime.date.today()
         msg = MIMEMultipart()
-        msg['From'] = 'FROM_ADDRESS'
-        msg['To'] = 'TO_ADDRESS'
+        msg['From'] = 'FROM ADDRESS'
+        msg['To'] = 'TO ADDRESS'
         msg['Subject'] = 'AWS Public Open rules'
-        message = "<h> Hi Team,<br><br> <h> Please find AWS Server SG rules opened to public (0.0.0.0/0) . <br> <br>"+html+"<h> <br> Best Regards, <br> Yuno"
+        message = "<h> Hi,<br><br> <h> Please find AWS Server SG rules opened to public (0.0.0.0/0) . <br> <br>"+html+"<h> <br> Best Regards, <br> YOUR NAME"
         msg.attach(MIMEText(message,'html'))
-        mailserver = smtplib.SMTP("email-smtp.us-east-1.amazonaws.com", 587)
+        mailserver = smtplib.SMTP("SERVERNAME", PORT)
         mailserver.ehlo()
         mailserver.starttls()
         mailserver.ehlo()
-        mailserver.login("SMTP_USERNAME,SMTP_PASSWORD")
-        mailserver.sendmail('FROM_ADDRESS','TO_ADDRESS',msg.as_string())
+        mailserver.login("<SMTP USERNAME>","<SMTP PASSWORD>")
+        mailserver.sendmail('<FROM ADDRESS>','<TO ADDRESS>',msg.as_string())
         mailserver.quit()
